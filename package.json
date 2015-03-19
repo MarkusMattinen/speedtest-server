@@ -15,5 +15,8 @@
   "license": "ISC",
   "dependencies": {
     "lodash": "^2.4.1"
+  },
+  "engines": {
+    "node": "~0.12.0"
   }
 }
