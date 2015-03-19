@@ -1,0 +1,19 @@
+{
+  "name": "speedtest-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git.gamma.fi/speedtest-server/miikan.git"
+  },
+  "author": "Markus Mattinen <inbox@gamma.fi>",
+  "license": "ISC",
+  "dependencies": {
+    "lodash": "^2.4.1"
+  }
+}
