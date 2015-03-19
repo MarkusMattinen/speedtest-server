@@ -51,7 +51,9 @@ var server = http.createServer(function(req, res) {
   var uploadBytes = 0;
   var chunkExtensionMaxLength = -1;
 
-  var chromeWorkaround = req.headers['user-agent'].toLowerCase().indexOf('chrome') !== -1;
+  if (req.headers['user-agent']) {
+    var chromeWorkaround = req.headers['user-agent'].toLowerCase().indexOf('chrome') !== -1;
+  }
 
   if (chromeWorkaround) {
     chunkExtensionMaxLength = 16000;
