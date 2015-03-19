@@ -198,6 +198,8 @@ var server = http.createServer(function(req, res) {
         var speedResultString = JSON.stringify(speedResults, null, 2).slice(1);
       }
 
+      if (res.socket) res.socket.removeListener('drain', onDrain);
+
       // send the results chunk and finalize the chunked encoding
       res.end(speedResultString.length.toString(16) + "\r\n" + speedResultString + "\r\n0\r\n\r\n");
       ended = true;
