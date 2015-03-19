@@ -6,16 +6,33 @@ var _ = require('lodash');
 
 var chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghiklmnopqrstuvwxyz';
 
+function writeData(data, res, chunkExtensionLengthMax) {
+  if (chunkExtensionLengthMax <= 0) {
+    return !res.write(data);
+  }
+
+  var i = 0;
+  var buffered = false;
+
+  for (var i = 0; i < data.length; i += chunkExtensionLengthMax) {
+    var ret = res.write(data.slice(i, i + chunkExtensionLengthMax) + "\r\n \r\n1;data=");
+
+    if (ret === false) buffered = true;
+  }
+
+  return buffered;
+}
+
 function generateRandomData(length) {
   length = length ? length : 32;
-  
+
   var string = '';
-  
+
   for (var i = 0; i < length; i++) {
     var randomNumber = Math.floor(Math.random() * chars.length);
     string += chars.substring(randomNumber, randomNumber + 1);
   }
-  
+
   return string;
 }
 
@@ -30,11 +47,19 @@ function hrTimeToMillis(hrTime) {
 var server = http.createServer(function(req, res) {
   var startTimeMillis = milliTime();
   var uploadBytes = 0;
+  var chunkExtensionMaxLength = -1;
+
+  var chromeWorkaround = req.headers['user-agent'].toLowerCase().indexOf('chrome') !== -1;
+
+  if (chromeWorkaround) {
+    chunkExtensionMaxLength = 16000;
+  }
+
 
   req.on('data', function(chunk) {
     uploadBytes += chunk.length;
   });
-    
+
   req.on('end', function() {
     var requestEndTimeMillis = milliTime();
 
@@ -87,24 +112,38 @@ var server = http.createServer(function(req, res) {
     // send the random data in a dummy chunk's chunk extension
     res.write("1;data=");
 
+    var ended = false;
+
     var responseStartTimeMillis = milliTime();
 
     var onDrain = function() {
+      if (ended) {
+        return;
+      }
+
       if (downloadBytes < bytesToWrite) {
         var dataToWrite = randomMegabyte.slice(0, bytesToWrite - downloadBytes);
-        var buffered = !res.write(dataToWrite);
+        var buffered = writeData(dataToWrite, res, chunkExtensionMaxLength);
         downloadBytes += dataToWrite.length;
 
         if (buffered) {
           // data was buffered, wait for drain event
+          return;
+        } else {
+          // data was not buffered, ready to send more data immediately
+          onDrain();
           return;
         }
       }
 
       var responseEndTimeMillis = milliTime();
 
-      // send first character of the speed results in a dummy chunk
-      res.write("\r\n{\r\n");
+      if (!chromeWorkaround) {
+        // send first character of the speed results in a dummy chunk
+        res.write("\r\n{\r\n");
+      } else {
+        res.write("\r\n \r\n");
+      }
 
       var speedResults = {};
 
@@ -148,18 +187,25 @@ var server = http.createServer(function(req, res) {
         speedResults = _.extend(speedResults, downloadResults);
       }
 
-      // leave out the first {, because we already sent it in the dummy chunk
-      var speedResultString = JSON.stringify(speedResults, null, 2).slice(1);
+      var speedResultString;
+
+      if (chromeWorkaround) {
+        var speedResultString = "\r\n" + JSON.stringify(speedResults, null, 2);
+      } else {
+        // leave out the first {, because we already sent it in the dummy chunk
+        var speedResultString = JSON.stringify(speedResults, null, 2).slice(1);
+      }
 
       // send the results chunk and finalize the chunked encoding
       res.end(speedResultString.length.toString(16) + "\r\n" + speedResultString + "\r\n0\r\n\r\n");
+      ended = true;
     }
 
     res.socket.on('drain', onDrain);
 
     // if everything fit in the OS buffers, we won't get a drain event
     var dataToWrite = randomMegabyte.slice(0, bytesToWrite);
-    var buffered = !res.write(dataToWrite);
+    var buffered = writeData(dataToWrite, res, chunkExtensionMaxLength);
     downloadBytes += dataToWrite.length;
 
     if (!buffered) {
