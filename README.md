@@ -20,3 +20,5 @@ According to the RFC chunk extensions that the client does not understand MUST b
 Then while sending and/or receiving data we just determine on the server-side how long it took, and then in another chunk in the same request we send the results.
 
 Unfortunately, it seems that some browsers don't like large amounts of data in chunk extensions, so they refuse to load the page.
+There is currently a workaround for Chrome that limits each line of chunk extensions to 16000 characters and sends a single space in each chunk.
+On Safari this does not seem to work at all. Other browsers have not been tested.
