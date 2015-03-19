@@ -36,6 +36,8 @@ function generateRandomData(length) {
   return string;
 }
 
+var randomMegabyte = generateRandomData(1024 * 1024);
+
 function milliTime() {
   return hrTimeToMillis(process.hrtime());
 }
@@ -89,8 +91,6 @@ var server = http.createServer(function(req, res) {
 
       bytesToWrite = Number(parts[1]) * multiplier;
     }
-
-    var randomMegabyte = generateRandomData(1024 * 1024);
 
     if (!_.isFinite(bytesToWrite)) {
       bytesToWrite = 0;
