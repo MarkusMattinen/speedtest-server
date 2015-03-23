@@ -50,6 +50,7 @@ var server = http.createServer(function(req, res) {
   var startTimeMillis = milliTime();
   var uploadBytes = 0;
   var chunkExtensionMaxLength = -1;
+  var requestEnded = false;
 
   if (req.headers['user-agent']) {
     var chromeWorkaround = req.headers['user-agent'].toLowerCase().indexOf('chrome') !== -1;
@@ -59,42 +60,57 @@ var server = http.createServer(function(req, res) {
     chunkExtensionMaxLength = 16000;
   }
 
+  var bytesToWrite = 0;
+  var maxSeconds = 0;
+  var secondsMode = false;
+  var parts = _.filter(req.url.split('/'));
 
-  req.on('data', function(chunk) {
-    uploadBytes += chunk.length;
-  });
+  if (parts.length >= 2) {
+    var multiplier;
 
-  req.on('end', function() {
-    var requestEndTimeMillis = milliTime();
-
-    var bytesToWrite = 0;
-    var parts = _.filter(req.url.split('/'));
-
-    if (parts.length >= 2) {
-      var multiplier;
-
-      switch (parts[0]) {
-      case 'byte':
-      case 'bytes':
-        multiplier = 1;
-        break;
-      case 'kilobyte':
-      case 'kilobytes':
-        multiplier = 1024;
-        break;
-      case 'megabyte':
-      case 'megabytes':
-        multiplier = 1024 * 1024;
-        break;
-      default:
-        multiplier = 0;
-        break;
-      }
-
-      bytesToWrite = Number(parts[1]) * multiplier;
+    switch (parts[0]) {
+    case 'byte':
+    case 'bytes':
+      multiplier = 1;
+      break;
+    case 'kilobyte':
+    case 'kilobytes':
+      multiplier = 1024;
+      break;
+    case 'megabyte':
+    case 'megabytes':
+      multiplier = 1024 * 1024;
+      break;
+    case 'seconds':
+      secondsMode = true;
+      break;
+    default:
+      multiplier = 0;
+      break;
     }
 
-    if (!_.isFinite(bytesToWrite)) {
+    if (secondsMode) {
+      maxSeconds = Number(parts[1]);
+      bytesToWrite = 65536;
+    } else {
+      bytesToWrite = Number(parts[1]) * multiplier;
+    }
+  }
+
+  if (!_.isFinite(bytesToWrite)) {
+    bytesToWrite = 0;
+  }
+
+  var onEnd = function() {
+    var requestEndTimeMillis = milliTime();
+
+    if (requestEnded) {
+      return;
+    }
+
+    requestEnded = true;
+
+    if (secondsMode && uploadBytes > 0) {
       bytesToWrite = 0;
     }
 
@@ -123,18 +139,35 @@ var server = http.createServer(function(req, res) {
         return;
       }
 
-      if (downloadBytes < bytesToWrite) {
-        var dataToWrite = randomMegabyte.slice(0, bytesToWrite - downloadBytes);
-        var buffered = writeData(dataToWrite, res, chunkExtensionMaxLength);
-        downloadBytes += dataToWrite.length;
+      if (secondsMode && bytesToWrite > 0) {
+        if ((milliTime() - responseStartTimeMillis) / 1000 < maxSeconds) {
+          var dataToWrite = randomMegabyte.slice(0, bytesToWrite);
+          var buffered = writeData(dataToWrite, res, chunkExtensionMaxLength);
+          downloadBytes += dataToWrite.length;
 
-        if (buffered) {
-          // data was buffered, wait for drain event
-          return;
-        } else {
-          // data was not buffered, ready to send more data immediately
-          onDrain();
-          return;
+          if (buffered) {
+            // data was buffered, wait for drain event
+            return;
+          } else {
+            // data was not buffered, ready to send more data immediately
+            setImmediate(onDrain);
+            return;
+          }
+        }
+      } else {
+        if (downloadBytes < bytesToWrite) {
+          var dataToWrite = randomMegabyte.slice(0, bytesToWrite - downloadBytes);
+          var buffered = writeData(dataToWrite, res, chunkExtensionMaxLength);
+          downloadBytes += dataToWrite.length;
+
+          if (buffered) {
+            // data was buffered, wait for drain event
+            return;
+          } else {
+            // data was not buffered, ready to send more data immediately
+            setImmediate(onDrain);
+            return;
+          }
         }
       }
 
@@ -192,10 +225,10 @@ var server = http.createServer(function(req, res) {
       var speedResultString;
 
       if (chromeWorkaround) {
-        var speedResultString = "\r\n" + JSON.stringify(speedResults, null, 2);
+        var speedResultString = "\r\n" + JSON.stringify(speedResults, null, 2) + "\r\n";
       } else {
         // leave out the first {, because we already sent it in the dummy chunk
-        var speedResultString = JSON.stringify(speedResults, null, 2).slice(1);
+        var speedResultString = JSON.stringify(speedResults, null, 2).slice(1) + "\r\n";
       }
 
       if (res.socket) res.socket.removeListener('drain', onDrain);
@@ -213,9 +246,23 @@ var server = http.createServer(function(req, res) {
     downloadBytes += dataToWrite.length;
 
     if (!buffered) {
-      onDrain();
+      setImmediate(onDrain);
+    }
+  };
+
+  req.on('data', function(chunk) {
+    if (requestEnded) {
+      return;
+    }
+
+    uploadBytes += chunk.length;
+
+    if (secondsMode && (milliTime() - startTimeMillis) / 1000 > maxSeconds) {
+      setImmediate(onEnd);
     }
   });
+
+  req.on('end', onEnd);
 });
 
 server.listen(process.env.PORT || 5000);
